@@ -9,40 +9,60 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
-func producer(stream Stream) (tweets []*Tweet) {
-	for {
-		tweet, err := stream.Next()
-		if err == ErrEOF {
-			return tweets
+func(m Messanger) produce(in chan<- *Tweet) {
+	defer m.wg.Done()
+	for {	
+		tweet, err := m.stream.Next()
+
+		if errors.Is(err, ErrEOF) {
+			close(in)
+			return
 		}
 
-		tweets = append(tweets, tweet)
+		in <- tweet
 	}
 }
 
-func consumer(tweets []*Tweet) {
-	for _, t := range tweets {
-		if t.IsTalkingAboutGo() {
-			fmt.Println(t.Username, "\ttweets about golang")
+func(m Messanger) consume(in <-chan *Tweet) {
+	defer m.wg.Done()
+
+	for tweet := range in {
+		if tweet.IsTalkingAboutGo() {
+			fmt.Println(tweet.Username, "\ttweets about golang")
 		} else {
-			fmt.Println(t.Username, "\tdoes not tweet about golang")
+			fmt.Println(tweet.Username, "\tdoes not tweet about golang")
 		}
 	}
+}
+
+type Messanger struct {
+	wg *sync.WaitGroup
+	stream Stream
 }
 
 func main() {
 	start := time.Now()
-	stream := GetMockStream()
+
+	m := Messanger{
+		wg: &sync.WaitGroup{},
+		stream: GetMockStream(),
+	}	
+	in := make(chan *Tweet)
 
 	// Producer
-	tweets := producer(stream)
+	m.wg.Add(1)
+	go m.produce(in)
 
 	// Consumer
-	consumer(tweets)
+	m.wg.Add(1)
+	go m.consume(in)
 
+	m.wg.Wait()
 	fmt.Printf("Process took %s\n", time.Since(start))
 }
